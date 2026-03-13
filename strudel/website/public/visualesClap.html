@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.0/lib/p5.min.js"></script>
+    <title>Control Público - Clap</title>
+</head>
+<body style="margin: 0; padding: 0;">
+    <script>
+        let socket;
+        let sliderR, sliderG, sliderB;
+        let r = 255, g = 200, b = 0;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            
+            // Conectar WebSocket directamente a tu IP
+            socket = new WebSocket('ws://127.0.0.1:8083');
+            
+            socket.onopen = () => {
+                console.log('✅ Conectado a ws://127.0.0.1:8083');
+            };
+            
+            socket.onerror = (e) => {
+                console.error('❌ Error conectando:', e);
+            };
+            
+            socket.onclose = () => {
+                console.log('🔌 Desconectado');
+            };
+            
+            // Crear sliders
+            sliderR = createSlider(0, 255, r);
+            sliderR.position(20, 100);
+            sliderR.style('width', '300px');
+            sliderR.input(enviarColor);
+            
+            sliderG = createSlider(0, 255, g);
+            sliderG.position(20, 160);
+            sliderG.style('width', '300px');
+            sliderG.input(enviarColor);
+            
+            sliderB = createSlider(0, 255, b);
+            sliderB.position(20, 220);
+            sliderB.style('width', '300px');
+            sliderB.input(enviarColor);
+        }
+
+        function draw() {
+            background(30);
+            
+            // Título
+            fill(255);
+            textSize(24);
+            text('👏 Control del Clap', 20, 40);
+            
+            // Estado de conexión
+            let statusColor = color(255, 0, 0);
+            let statusText = '✗ Desconectado';
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                statusColor = color(0, 255, 0);
+                statusText = '✓ Conectado';
+            }
+            
+            fill(statusColor);
+            textSize(14);
+            text(statusText, 20, 70);
+            
+            // Vista previa
+            r = sliderR.value();
+            g = sliderG.value();
+            b = sliderB.value();
+            
+            fill(r, g, b);
+            noStroke();
+            circle(width/2, height - 100, 80);
+            
+            // Labels
+            fill(255, 100, 100);
+            textSize(16);
+            text('Rojo: ' + r, 20, 90);
+            
+            fill(100, 255, 100);
+            text('Verde: ' + g, 20, 150);
+            
+            fill(100, 150, 255);
+            text('Azul: ' + b, 20, 210);
+        }
+
+        function enviarColor() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const mensaje = {
+                    address: '/cp_rgb',
+                    args: [sliderR.value(), sliderG.value(), sliderB.value()]
+                };
+                socket.send(JSON.stringify(mensaje));
+                console.log('📤 Enviado:', mensaje);
+            } else {
+                console.warn('⚠️ WebSocket no conectado, no se puede enviar');
+            }
+        }
+    </script>
+</body>
+</html>

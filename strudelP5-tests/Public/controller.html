@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Control Visual</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0a; --surface: #111; --accent: #00ffcc;
+      --accent2: #ff2d78; --text: #f0f0f0; --muted: #444;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Space Mono', monospace;
+      min-height: 100dvh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 2rem; padding: 2rem 1.5rem;
+    }
+    body::before {
+      content: ''; position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(0,255,204,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,204,0.03) 1px, transparent 1px);
+      background-size: 40px 40px; pointer-events: none;
+    }
+    .container { position: relative; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 2.5rem; }
+    header { text-align: center; }
+    header h1 { font-size: 0.7rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.4rem; }
+    .title { font-size: 1.6rem; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px rgba(0,255,204,0.4); }
+    .status { display: flex; align-items: center; justify-content: center; gap: 0.5rem; font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); transition: background 0.3s, box-shadow 0.3s; }
+    .status-dot.connected { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .card { background: var(--surface); border: 1px solid #1e1e1e; border-radius: 12px; padding: 1.8rem 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
+    .param-label { display: flex; justify-content: space-between; align-items: baseline; }
+    .param-name { font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+    .param-value { font-size: 2rem; font-weight: 700; color: var(--accent); }
+    .slider-wrap { position: relative; height: 48px; display: flex; align-items: center; }
+    input[type="range"] { -webkit-appearance: none; width: 100%; height: 4px; background: var(--muted); border-radius: 2px; outline: none; cursor: pointer; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px rgba(0,255,204,0.6); cursor: grab; transition: transform 0.1s; }
+    input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.2); cursor: grabbing; }
+    .track-fill { position: absolute; left: 0; height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 2px; pointer-events: none; }
+    .preview-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.8rem; }
+    .preview-label { font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+    .preview-stage { width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; border: 1px dashed #1e1e1e; border-radius: 8px; }
+    .preview-circle { border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 0 20px rgba(0,255,204,0.3); transition: width 0.1s, height 0.1s; }
+    .btn-reset { width: 100%; padding: 0.9rem; background: transparent; border: 1px solid var(--muted); border-radius: 8px; color: var(--muted); font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; transition: border-color 0.2s, color 0.2s; }
+    .btn-reset:hover { border-color: var(--accent2); color: var(--accent2); }
+    .btn-reset:active { background: rgba(255,45,120,0.1); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Visual Controller</h1>
+      <div class="title">FIGURA</div>
+    </header>
+    <div class="status">
+      <div class="status-dot" id="dot"></div>
+      <span id="status-text">conectando...</span>
+    </div>
+    <div class="card">
+      <div class="param-label">
+        <span class="param-name">Tamaño</span>
+        <span class="param-value" id="size-display">50</span>
+      </div>
+      <div class="slider-wrap">
+        <div class="track-fill" id="track-fill"></div>
+        <input type="range" id="size-slider" min="0" max="100" value="50" step="1" />
+      </div>
+      <div class="preview-wrap">
+        <span class="preview-label">Vista previa</span>
+        <div class="preview-stage">
+          <div class="preview-circle" id="preview-circle" style="width:60px;height:60px;"></div>
+        </div>
+      </div>
+    </div>
+    <button class="btn-reset" id="btn-reset">↺ Reset a 50</button>
+  </div>
+
+  <script>
+    const socket = io(); // se conecta al mismo servidor que sirve esta página
+
+    const dot = document.getElementById('dot');
+    const statusText = document.getElementById('status-text');
+    const slider = document.getElementById('size-slider');
+    const display = document.getElementById('size-display');
+    const trackFill = document.getElementById('track-fill');
+    const preview = document.getElementById('preview-circle');
+    const btnReset = document.getElementById('btn-reset');
+
+    socket.on('connect', () => { dot.classList.add('connected'); statusText.textContent = 'conectado ✓'; });
+    socket.on('disconnect', () => { dot.classList.remove('connected'); statusText.textContent = 'desconectado'; });
+
+    function updateUI(val) {
+      display.textContent = val;
+      const pct = val / 100;
+      const fillW = 14 + pct * (slider.offsetWidth - 28);
+      trackFill.style.width = fillW + 'px';
+      const sz = 10 + pct * 100;
+      preview.style.width = sz + 'px';
+      preview.style.height = sz + 'px';
+    }
+
+    slider.addEventListener('input', () => {
+      const val = parseInt(slider.value);
+      updateUI(val);
+      socket.emit('visual-control', { parametro: 'tamanio', valor: val });
+    });
+
+    btnReset.addEventListener('click', () => {
+      slider.value = 50; updateUI(50);
+      socket.emit('visual-control', { parametro: 'tamanio', valor: 50 });
+    });
+
+    updateUI(50);
+  </script>
+</body>
+</html>

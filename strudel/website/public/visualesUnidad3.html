@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Visuales Reactivas - Pieza de Audio Interactivo</title>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.min.js"></script>
+  <style> 
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      background: black; 
+    } 
+  </style>
+</head>
+<body>
+
+<script>
+  let eventQueue = [];
+  let activeAnimations = [];
+  const LATENCY_CORRECTION = 0;
+
+  // ========================================
+  // VARIABLES DE COLOR CONTROLABLES
+  // ========================================
+
+  // sawtooth
+  let sawtoothRed = 255;
+  let sawtoothGreen = 100;
+  let sawtoothBlue = 180;
+
+  // square / clip
+  let squareRed = 255;
+  let squareGreen = 50;
+  let squareBlue = 50;
+
+  // piano
+  let pianoRed = 0; //100
+  let pianoGreen = 0; //150
+  let pianoBlue = 255; //255
+
+  // bd / 909bd
+  let bdRed = 255;
+  let bdGreen = 0;
+  let bdBlue = 80;
+
+  // sd / 909sd
+  let sdRed = 0;
+  let sdGreen = 200;
+  let sdBlue = 255;
+
+  // rim / 909rim
+  let rimRed = 0;
+  let rimGreen = 255;
+  let rimBlue = 200;
+
+  // cp / 909cp
+  let cpRed = 255;
+  let cpGreen = 200;
+  let cpBlue = 0;
+
+  // hh / 909hh
+  let hhRed = 255;
+  let hhGreen = 255;
+  let hhBlue = 100;
+
+  // Convierte HSB (0-1 cada canal) a RGB (0-255)
+  function hsbToRgb(h, s, b) {
+    let r, g, bl;
+    if (s === 0) { r = g = bl = b * 255; return [r, g, bl]; }
+    let i = Math.floor(h * 6);
+    let f = h * 6 - i;
+    let p = b * (1 - s);
+    let q = b * (1 - f * s);
+    let t = b * (1 - (1 - f) * s);
+    switch (i % 6) {
+      case 0: r = b; g = t; bl = p; break;
+      case 1: r = q; g = b; bl = p; break;
+      case 2: r = p; g = b; bl = t; break;
+      case 3: r = p; g = q; bl = b; break;
+      case 4: r = t; g = p; bl = b; break;
+      case 5: r = b; g = p; bl = q; break;
+    }
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(bl * 255)];
+  }
+
+  function setup() {
+    createCanvas(windowWidth, windowHeight);
+    rectMode(CENTER);
+    noStroke();
+
+    // WebSocket Strudel Bridge
+    const socket = new WebSocket('ws://localhost:8081');
+
+    socket.onopen = () => {
+      console.log('✅ WebSocket conectado');
+    };
+
+    socket.onerror = (error) => {
+      console.error('❌ Error WebSocket:', error);
+    };
+
+    socket.onmessage = (event) => {
+      //console.log("RAW:", event.data);
+        const msg = JSON.parse(event.data);
+        
+        let params = {};
+        
+        for (let i = 0; i < msg.args.length; i += 2) {
+            params[msg.args[i]] = msg.args[i+1];
+        }
+        
+        //console.log('🎵', params.s || 'unknown', '| note:', params.n || params.note);
+        
+        eventQueue.push({ 
+          timestamp: msg.timestamp, 
+          sound: params.s || 'unknown',
+          note: noteToNumber(params.note || params.n || 0),
+          delta: params.delta || 0.25,
+          gain: params.gain || 0.5,
+          params: params 
+        });
+
+        eventQueue.sort((a, b) => a.timestamp - b.timestamp);
+    };
+
+    function noteToNumber(note) {
+      if (typeof note === 'number') return note;
+      const notes = { 'C':0,'D':2,'E':4,'F':5,'G':7,'A':9,'B':11 };
+      const letter = note[0];
+      const octave = parseInt(note.slice(-1)) || 4;
+      return (notes[letter] || 0) + octave;
+    }
+
+    // WebSocket Open Stage Control Bridge
+    const socketControl = new WebSocket('ws://localhost:8083');
+
+    socketControl.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      // Sawtooth
+      if (data.address == "/sawtooth_rgb") {
+        sawtoothRed   = Number(data.args?.[0] ?? sawtoothRed);
+        sawtoothGreen = Number(data.args?.[1] ?? sawtoothGreen);
+        sawtoothBlue  = Number(data.args?.[2] ?? sawtoothBlue);
+      }
+      // Square / Clip
+      if (data.address == "/square_rgb") {
+        squareRed   = Number(data.args?.[0] ?? squareRed);
+        squareGreen = Number(data.args?.[1] ?? squareGreen);
+        squareBlue  = Number(data.args?.[2] ?? squareBlue);
+      }
+
+      // BD — pad XY: X controla hue, Y controla brillo
+      if (data.address == "/xy_1") {
+        let h = Number(data.args?.[0] ?? 0); // 0.0 a 1.0
+        let b = Number(data.args?.[1] ?? 1); // 0.0 a 1.0
+        let rgb = hsbToRgb(h, 1.0, b);
+        bdRed   = rgb[0];
+        bdGreen = rgb[1];
+        bdBlue  = rgb[2];
+        //console.log("BD color:", bdRed, bdGreen, bdBlue);
+      }
+      // Piano — fader_1 controla brillo general del color
+      if (data.address == "/rgb_1") {
+        pianoRed   = Number(data.args?.[0] ?? pianoRed);
+        pianoGreen = Number(data.args?.[1] ?? pianoGreen);
+        pianoBlue  = Number(data.args?.[2] ?? pianoBlue);
+        //console.log("Piano color:", pianoRed, pianoGreen, pianoBlue);
+      }
+      // SD
+      if (data.address == "/sd_rgb") {
+        sdRed   = Number(data.args?.[0] ?? sdRed);
+        sdGreen = Number(data.args?.[1] ?? sdGreen);
+        sdBlue  = Number(data.args?.[2] ?? sdBlue);
+      }
+      // Rim
+      if (data.address == "/rim_rgb") {
+        rimRed   = Number(data.args?.[0] ?? rimRed);
+        rimGreen = Number(data.args?.[1] ?? rimGreen);
+        rimBlue  = Number(data.args?.[2] ?? rimBlue);
+      }
+      // CP
+      if (data.address == "/cp_rgb") {
+        cpRed   = Number(data.args?.[0] ?? cpRed);
+        cpGreen = Number(data.args?.[1] ?? cpGreen);
+        cpBlue  = Number(data.args?.[2] ?? cpBlue);
+      }
+      // HH
+      if (data.address == "/hh_rgb") {
+        hhRed   = Number(data.args?.[0] ?? hhRed);
+        hhGreen = Number(data.args?.[1] ?? hhGreen);
+        hhBlue  = Number(data.args?.[2] ?? hhBlue);
+      }
+    };
+
+    socketControl.onerror = (err) => {
+      console.error('❌ Error WebSocket Control:', err);
+    };
+  }
+
+  function draw() {
+    background(0, 40);
+
+    let now = Date.now() + LATENCY_CORRECTION;
+
+    while (eventQueue.length > 0 && now >= eventQueue[0].timestamp) {
+        let ev = eventQueue.shift();
+
+        activeAnimations.push({
+          startTime: ev.timestamp,
+          duration: ev.delta * 1000,
+          type: ev.sound,
+          note: ev.note,
+          gain: ev.gain,
+          x: random(width * 0.2, width * 0.8), 
+          y: random(height * 0.2, height * 0.8),
+          color: getColorForSound(ev.sound, ev.note)
+        });
+    }
+    
+    for (let i = activeAnimations.length - 1; i >= 0; i--) {
+      let anim = activeAnimations[i];
+      let elapsed = now - anim.startTime;
+      let progress = elapsed / anim.duration;
+
+      if (progress <= 1.0) {
+        dibujarElemento(anim, progress);
+      } else {
+        activeAnimations.splice(i, 1);
+      }
+    }
+  }
+
+  function dibujarElemento(anim, p) {
+    push();
+    // Recalcular color en tiempo real para reflejar cambios del control externo
+    const color = getColorForSound(anim.type, anim.note);
+    
+    switch (anim.type) {
+      case 'sawtooth':
+        dibujarSawtoothDistort(anim, p, color);
+        break;
+
+      case 'square':
+      case 'clip':
+        dibujarClip(anim, p, color);
+        break;
+
+      case 'piano':
+        console.log("Dibujando piano con color:", color);
+        dibujarPiano(anim, p, color);
+        break;
+
+      case 'bd':
+      case '909bd':
+        dibujarBombo(p, color);
+        break;
+
+      case 'rim':
+      case '909rim':
+        dibujarRim(anim, p, color);
+        break;
+
+      case 'cp':
+      case '909cp':
+        dibujarClap(anim, p, color);
+        break;
+
+      case 'hh':
+      case '909hh':
+        dibujarHat(anim, p, color);
+        break;
+
+      case 'sd':
+      case '909sd':
+        dibujarCaja(p, color);
+        break;
+
+      default:
+        dibujarDefault(anim, p, color);
+        break;
+    }
+    pop();
+  }
+
+  // ========================================
+  // FUNCIONES VISUALES ESPECÍFICAS
+  // ========================================
+
+  function dibujarSawtoothDistort(anim, p, c) {
+    let yPos = map(anim.note, 0, 12, height * 0.7, height * 0.3);
+    let xPos = width / 2;
+    
+    let distortion = sin(p * TWO_PI * 8) * 10;
+    let size = lerp(150, 50, p) + distortion;
+    let alpha = lerp(200, 0, p);
+    
+    noFill();
+    stroke(c[0], c[1], c[2], alpha);
+    strokeWeight(3);
+    
+    for (let i = 0; i < 3; i++) {
+      let offset = i * 15;
+      circle(xPos + offset, yPos, size + offset);
+    }
+  }
+
+  function dibujarClip(anim, p, c) {
+    let alpha = lerp(255, 0, p);
+    fill(c[0], c[1], c[2], alpha);
+    
+    let fragments = 8;
+    for (let i = 0; i < fragments; i++) {
+      let angle = (TWO_PI / fragments) * i;
+      let distance = lerp(0, 200, p);
+      let x = width / 2 + cos(angle) * distance;
+      let y = height / 2 + sin(angle) * distance;
+      let size = lerp(30, 5, p);
+      
+      push();
+      translate(x, y);
+      rotate(angle + p * PI);
+      rect(0, 0, size, size * 2);
+      pop();
+    }
+  }
+
+  function dibujarPiano(anim, p, c) {
+
+    //console.log("🎹 piano:", anim.note, typeof anim.note, anim.gain, anim.x, c);
+
+    let noteHeight = map(anim.note, 0, 12, height * 0.8, height * 0.2);
+    let bounce = abs(sin(p * PI * 3)) * 20;
+    let yPos = noteHeight + bounce;
+    
+    let size = anim.gain * 300;
+    let currentSize = lerp(size, size * 0.3, p);
+    let alpha = lerp(220, 0, p);
+    
+    fill(c[0], c[1], c[2], alpha);
+    
+    rectMode(CORNER);
+    rect(anim.x - currentSize/2, yPos, currentSize, currentSize * 0.3, 5);
+    rectMode(CENTER);
+    
+    noFill();
+    stroke(c[0], c[1], c[2], alpha * 0.5);
+    strokeWeight(2);
+    let waveSize = lerp(0, 300, p);
+    circle(anim.x, yPos, waveSize);
+  }
+
+  function dibujarBombo(p, c) {
+    let d = lerp(100, 700, p);
+    let alpha = lerp(255, 0, p);
+    
+    fill(c[0], c[1], c[2], alpha * 0.3);
+    circle(width / 2, height / 2, d * 1.2);
+    
+    fill(c[0], c[1], c[2], alpha);
+    circle(width / 2, height / 2, d);
+  }
+
+  function dibujarCaja(p, c) {
+    let w = lerp(width, 0, p);
+    let alpha = lerp(255, 0, p);
+    fill(c[0], c[1], c[2], alpha);
+    rect(width / 2, height / 2, w, 50);
+  }
+
+  function dibujarRim(anim, p, c) {
+    let alpha = lerp(255, 0, p);
+    strokeWeight(lerp(10, 2, p));
+    stroke(c[0], c[1], c[2], alpha);
+    
+    let margin = 50;
+    let len = lerp(0, 200, p);
+    
+    line(anim.x, margin, anim.x, margin + len);
+    line(anim.x, height - margin, anim.x, height - margin - len);
+  }
+
+  function dibujarClap(anim, p, c) {
+    noFill();
+    
+    for (let i = 0; i < 4; i++) {
+      let delay = i * 0.15;
+      let adjustedP = constrain(p - delay, 0, 1);
+      
+      if (adjustedP > 0) {
+        let size = lerp(50, 400, adjustedP);
+        let alpha = lerp(200, 0, adjustedP);
+        
+        stroke(c[0], c[1], c[2], alpha);
+        strokeWeight(3);
+        circle(anim.x, anim.y, size);
+      }
+    }
+  }
+
+  function dibujarHat(anim, p, c) {
+    let sz = lerp(40, 0, p);
+    let alpha = lerp(255, 0, p);
+    fill(c[0], c[1], c[2], alpha);
+    rect(anim.x, anim.y, sz, sz);
+  }
+
+  function dibujarDefault(anim, p, c) {
+    let size = lerp(150, 0, p);
+    let alpha = lerp(200, 0, p);
+    fill(c[0], c[1], c[2], alpha);
+    circle(anim.x, anim.y, size);
+  }
+
+  // ========================================
+  // SISTEMA DE COLORES (ahora usando variables)
+  // ========================================
+
+  function getColorForSound(s, note = 0) {
+    if (!s) return [150, 150, 150];
+
+    const colors = {
+      'sawtooth': [sawtoothRed, sawtoothGreen, sawtoothBlue],
+      'square':   [squareRed, squareGreen, squareBlue],
+      'clip':     [squareRed, squareGreen, squareBlue],
+      'piano':    [pianoRed, pianoGreen, pianoBlue],
+      'bd':       [bdRed, bdGreen, bdBlue],
+      '909bd':    [bdRed, bdGreen, bdBlue],
+      'sd':       [sdRed, sdGreen, sdBlue],
+      '909sd':    [sdRed, sdGreen, sdBlue],
+      'rim':      [rimRed, rimGreen, rimBlue],
+      '909rim':   [rimRed, rimGreen, rimBlue],
+      'cp':       [cpRed, cpGreen, cpBlue],
+      '909cp':    [cpRed, cpGreen, cpBlue],
+      'hh':       [hhRed, hhGreen, hhBlue],
+      '909hh':    [hhRed, hhGreen, hhBlue],
+      'unknown':  [150, 100, 150]
+    };
+
+    if (colors[s]) return colors[s];
+
+    // Color basado en hash del nombre para sonidos desconocidos
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) {
+      hash = s.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let r = Math.abs(hash % 255);
+    let g = Math.abs((hash * 123) % 255);
+    let b = Math.abs((hash * 456) % 255);
+    return [r, g, b];
+  }
+
+  function windowResized() { 
+    resizeCanvas(windowWidth, windowHeight); 
+  }
+
+</script>
+</body>
+</html>

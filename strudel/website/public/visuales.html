@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.min.js"></script>
+  <style> body { margin: 0; overflow: hidden; background: black; } </style>
+</head>
+<body>
+<script>
+
+  let eventQueue = [];
+  let activeAnimations = []; // Animaciones que se están dibujando ahora
+  const LATENCY_CORRECTION = 0; // Ajuste fino en ms (ej. 50 si el audio va lento)
+
+  function setup() {
+    createCanvas(windowWidth, windowHeight);
+    rectMode(CENTER);
+    noStroke();
+
+    const socket = new WebSocket('ws://localhost:8081');
+
+    socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        console.log('Mensaje OSC recibido:', msg);
+        let params = {};
+        
+        for (let i = 0; i < msg.args.length; i += 2) {
+            params[msg.args[i]] = msg.args[i+1];
+        }
+        eventQueue.push({ 
+          timestamp: msg.timestamp, 
+          sound: params.s,
+          delta: params.delta || 0.25,
+          params: params });
+
+        eventQueue.sort((a, b) => a.timestamp - b.timestamp);
+    };
+  }
+
+  function draw() {
+    background(0, 30); 
+
+    let now = Date.now() + LATENCY_CORRECTION;
+
+    while (eventQueue.length > 0 && now >= eventQueue[0].timestamp) {
+        let ev = eventQueue.shift();
+
+        activeAnimations.push({
+        startTime: ev.timestamp,
+        duration: ev.delta * 1000, // Convertimos delta a milisegundos
+        type: ev.sound,
+        x: random(width * 0.2, width * 0.8), 
+        y: random(height * 0.2, height * 0.8),
+        color: getColorForSound(ev.sound)
+        })        
+
+    }
+    
+    for (let i = activeAnimations.length - 1; i >= 0; i--) {
+      let anim = activeAnimations[i];
+      
+      // Calculamos el progreso rítmico (0.0 al inicio, 1.0 al final del delta)
+      let elapsed = now - anim.startTime;
+      let progress = elapsed / anim.duration;
+
+      if (progress <= 1.0) {
+        dibujarElemento(anim, progress);
+      } else {
+        // La animación terminó su ciclo rítmico, la eliminamos
+        activeAnimations.splice(i, 1);
+      }
+    }
+  }
+
+  function dibujarElemento(anim, p) {
+    push();
+    const color = anim.color;
+    
+    switch (anim.type) {
+      case 'tr909bd':
+        dibujarBombo(p, color);
+        break;
+
+      case 'tr909sd':
+        dibujarCaja(p, color);
+        break;
+
+      case 'tr909hh':
+      case 'tr909oh':
+        dibujarHat(anim, p, color);
+        break;
+
+      default:
+        dibujarDefault(anim, p, color);
+        break;
+    }
+    pop();
+  }
+
+
+  function dibujarBombo(p, c) {
+    let d = lerp(100, 600, p);
+    let alpha = lerp(255, 0, p);
+    fill(c[0], c[1], c[2], alpha);
+    circle(width / 2, height / 2, d);
+  }
+
+  function dibujarCaja(p, c) {
+    let w = lerp(width, 0, p);
+    let alpha = lerp(255, 0, p);
+    fill(c[0], c[1], c[2], alpha);
+    rect(width / 2, height / 2, w, 50);
+  }
+
+  function dibujarHat(anim, p, c) {
+    let sz = lerp(40, 0, p);
+    fill(c[0], c[1], c[2]);
+    rect(anim.x, anim.y, sz, sz);
+  }
+
+  function dibujarDefault(anim, p, c) {
+    // Un rombo que gira en una posición aleatoria (fijada al nacer la animación)
+    // Usamos el progreso 'p' para la rotación y el tamaño
+    let size = lerp(100, 0, p);
+    let angle = p * TWO_PI;
+
+    translate(anim.x, anim.y);
+    rotate(angle);
+    
+    stroke(c[0], c[1], c[2]);
+    strokeWeight(2);
+    noFill();
+    
+    // Dibujamos un rombo o estrella simple
+    rect(0, 0, size, size);
+    line(-size, 0, size, 0);
+    line(0, -size, 0, size);
+    
+    // Mostrar el nombre del sonido pequeño (opcional, útil para debug)
+    noStroke();
+    fill(255, 150);
+    textSize(20);
+    text(anim.type, 10, 10);
+  }
+
+  function getColorForSound(s) {
+    const colors = {
+      'tr909bd': [255, 0, 80],
+      'tr909sd': [0, 200, 255],
+      'tr909hh': [255, 255, 0],
+      'tr909oh': [255, 150, 0]
+    };
+
+    if (colors[s]) return colors[s];
+
+    // Si el sonido no existe, generamos un color aleatorio pero consistente
+    // basado en la primera letra del nombre del sonido
+    let charCode = s.charCodeAt(0) || 0;
+    let r = (charCode * 123) % 255;
+    let g = (charCode * 456) % 255;
+    let b = (charCode * 789) % 255;
+    return [r, g, b];
+  }  
+
+  function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+
+
+</script>
+</body>
+
+</html>

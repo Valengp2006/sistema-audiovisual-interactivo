@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+  <style> body { margin: 0; overflow: hidden; background: black; } </style>
+</head>
+<body>
+<script>
+
+
+  let eventQueue = [];
+  let diametro = 0;
+
+  function setup() {
+    createCanvas(windowWidth, windowHeight);
+    console.log('p5.js canvas initialized');
+    noStroke();
+
+    const socket = new WebSocket('ws://localhost:8081');
+    socket.onopen = () => {
+        console.log('WebSocket conectado al servidor OSC');
+    };
+    socket.onerror = (error) => {
+        console.error('Error en WebSocket:', error);
+    };
+    socket.onclose = () => {
+        console.log('WebSocket desconectado');
+    };
+    
+
+    socket.onmessage = (event) => {
+
+
+
+        const msg = JSON.parse(event.data);
+        console.log('Mensaje OSC recibido:', msg);
+        
+        let params = {};
+        for (let i = 0; i < msg.args.length; i += 2) {
+            params[msg.args[i]] = msg.args[i+1];
+        }
+
+        eventQueue.push({
+            timestamp: msg.timestamp,
+            params: params
+        });
+
+        eventQueue.sort((a, b) => a.timestamp - b.timestamp);
+    };
+  }
+
+  function draw() {
+    background(0, 50); // Efecto estela
+
+    let now = Date.now();
+
+    while (eventQueue.length > 0 && now >= eventQueue[0].timestamp) {
+        // Imprime now y el timestamp del evento que se va a ejecutar
+        console.log('now:', now, 'ev.timestamp:', eventQueue[0].timestamp);
+        
+        let ev = eventQueue.shift(); // Sacamos el primero (el más antiguo)
+        ejecutarVisual(ev.params);
+    }    
+
+    if (diametro > 0) {
+        fill(255, 0, 100);
+        circle(width/2, height/2, diametro);
+        diametro *= 0.85; // Se encoge en cada frame
+    }
+  }
+  
+  function ejecutarVisual(p) {
+    if (p.s === 'tr909bd') {  
+        diametro = 300; // ¡Disparo el visual en el momento exacto!
+    }
+  }
+
+  function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+</script>
+</body>
+</html>
